@@ -28,9 +28,9 @@
     "url": "https://github.com/juice-shop/juice-shop.git"
   },
   "license": "MIT",
-  "author": "Björn Kimminich <bjoern.kimminich@owasp.org> (https://kimminich.de)",
+  "author": "Bjorn Kimminich <bjoern.kimminich@owasp.org> (https://kimminich.de)",
   "contributors": [
-    "Björn Kimminich",
+    "Bjorn Kimminich",
     "Jannik Hollenbach",
     "Aashish683",
     "greenkeeper[bot]",
