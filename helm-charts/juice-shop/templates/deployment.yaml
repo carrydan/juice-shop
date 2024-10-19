@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "juice-shop.fullname" . }}
+  labels:
+    {{- include "juice-shop.labels" . | nindent 4 }}
+  annotations:
+    meta.helm.sh/release-name: "{{ .Release.Name }}"
+    meta.helm.sh/release-namespace: "{{ .Release.Namespace }}"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "juice-shop.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "juice-shop.name" . }}
+      annotations:
+        meta.helm.sh/release-name: "{{ .Release.Name }}"
+        meta.helm.sh/release-namespace: "{{ .Release.Namespace }}"
+    spec:
+      serviceAccountName: {{ include "juice-shop.serviceAccountName" . }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+          env:
+            - name: PORT
+              value: "{{ .Values.env.PORT }}"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: juice-shop-secret
+                  key: jwtSecret

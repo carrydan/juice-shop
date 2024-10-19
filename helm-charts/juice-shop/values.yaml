@@ -1,0 +1,27 @@
+replicaCount: 1
+
+image:
+  repository: carrydan/juice-shop
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: NodePort
+  port: 3001
+  nodePort: 30002
+
+env:
+  PORT: "3001"
+  # JWT_SECRET: "YOUR_JWT_SECRET_HERE"
+
+resources: {}
+
+ingress:
+  enabled: false
+
+autoscaling:
+  enabled: false
+
+serviceAccount:
+  create: true
+  name: ""
