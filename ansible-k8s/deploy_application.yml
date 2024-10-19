@@ -1,0 +1,30 @@
+---
+- name: Deploy OWASP Juice Shop
+  hosts: localhost
+  become: yes
+  vars:
+    app_namespace: default
+    jwt_secret: "{{ vault_jwt_secret }}"
+  tasks:
+    - name: Create Kubernetes Secret for JWT_SECRET
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: juice-shop-secret
+            namespace: "{{ app_namespace }}"
+          type: Opaque
+          data:
+            jwtSecret: "{{ jwt_secret | b64encode }}"
+
+    - name: Deploy Juice Shop using Helm
+      community.kubernetes.helm:
+        name: juice-shop
+        chart_path: ./helm-charts/juice-shop
+        release_namespace: "{{ app_namespace }}"
+        create_namespace: false
+        values:
+          - env:
+              JWT_SECRET: "{{ jwt_secret }}"

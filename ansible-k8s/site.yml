@@ -1,0 +1,7 @@
+---
+- import_playbook: install_collections.yml
+- import_playbook: install_kubernetes.yml
+- import_playbook: install_monitoring.yml
+- import_playbook: install_logging.yml
+- import_playbook: deploy_application.yml
+

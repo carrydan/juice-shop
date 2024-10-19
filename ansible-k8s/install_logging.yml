@@ -1,0 +1,67 @@
+---
+- name: Install Logging Stack (Elasticsearch, Fluentd, Kibana)
+  hosts: localhost
+  become: yes
+  vars:
+    logging_namespace: logging
+  tasks:
+    - name: Create namespace for logging
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ logging_namespace }}"
+
+    - name: Add Helm repository for Elastic
+      kubernetes.core.helm_repository:
+        name: elastic
+        repo_url: https://helm.elastic.co
+        state: present
+
+    - name: Update Helm repositories
+      command: helm repo update
+      args:
+        warn: false
+
+    - name: Install Elasticsearch
+      kubernetes.core.helm:
+        name: elasticsearch
+        chart_ref: elastic/elasticsearch
+        release_namespace: "{{ logging_namespace }}"
+        create_namespace: false
+
+    - name: Install Kibana
+      kubernetes.core.helm:
+        name: kibana
+        chart_ref: elastic/kibana
+        release_namespace: "{{ logging_namespace }}"
+        create_namespace: false
+        values:
+          - service:
+              type: NodePort
+              nodePort: 32001
+          - env:
+              ELASTICSEARCH_HOSTS: http://elasticsearch-master:9200
+
+    - name: Add Helm repository for Fluent Bit
+      kubernetes.core.helm_repository:
+        name: fluent
+        repo_url: https://fluent.github.io/helm-charts
+        state: present
+
+    - name: Install Fluent Bit
+      kubernetes.core.helm:
+        name: fluent-bit
+        chart_ref: fluent/fluent-bit
+        release_namespace: "{{ logging_namespace }}"
+        create_namespace: false
+        values:
+          - backend:
+              type: es
+              es:
+                host: elasticsearch-master
+                port: 9200
+          - serviceAccount:
+              create: true

@@ -7,7 +7,7 @@ on:
     branches: [ master ]
 
 jobs:
-  build-and-push:
+  build-test-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -21,11 +21,11 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build frontend
-        run: npm run build:frontend || true
+      - name: Run tests
+        run: npm test
 
-      - name: Build server
-        run: npm run build:server || true
+      - name: Build application
+        run: npm run build
 
       - name: Build Docker image
         run: |
@@ -43,20 +43,12 @@ jobs:
           docker tag carrydan/juice-shop:${{ github.sha }} carrydan/juice-shop:latest
           docker push carrydan/juice-shop:latest
 
-  test:
-    if: always()  # Ignore test failures
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+      - name: Deploy to Kubernetes
+        uses: azure/k8s-deploy@v3
         with:
-          node-version: 'lts/*'
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run tests
-        run: npm test || true  # Ignore test errors
+          namespace: default
+          manifests: |
+            kubernetes/deployment.yaml
+            kubernetes/service.yaml
+          images: |
+            carrydan/juice-shop:${{ github.sha }}
