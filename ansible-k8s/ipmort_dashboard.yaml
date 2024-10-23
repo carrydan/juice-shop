@@ -1,0 +1,29 @@
+---
+- name: Import Grafana dashboards
+  hosts: localhost
+  tasks:
+
+    - name: Create ConfigMap for Grafana dashboards
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: grafana-dashboards
+            namespace: monitoring
+            labels:
+              grafana_dashboard: "1"
+          data:
+            dashboard-1.json: "{{ lookup('file', 'dashboards/dashboard-1.json') }}"
+            dashboard-2.json: "{{ lookup('file', 'dashboards/dashboard-2.json') }}"
+            
+    - name: Restart Grafana pods to apply new dashboards
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        kind: Pod
+        namespace: monitoring
+        label_selectors:
+          - app.kubernetes.io/name=grafana

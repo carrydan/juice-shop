@@ -1,1 +1,2 @@
-localhost ansible_connection=local
+[localhost]
+localhost ansible_connection=local kubeconfig_path=/home/carrydan/.kube/config

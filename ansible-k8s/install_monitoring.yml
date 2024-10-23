@@ -1,51 +1,73 @@
 ---
 - name: Install Monitoring Stack (Prometheus and Grafana)
   hosts: localhost
-  become: yes
+  connection: local
+  gather_facts: yes
+
   vars:
-    prometheus_namespace: monitoring
+    kubeconfig_path: "/home/carrydan/.kube/config"
+
   tasks:
     - name: Create namespace for monitoring
       kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: v1
           kind: Namespace
           metadata:
-            name: "{{ prometheus_namespace }}"
+            name: monitoring
 
     - name: Add Helm repository for Prometheus
       kubernetes.core.helm_repository:
         name: prometheus-community
         repo_url: https://prometheus-community.github.io/helm-charts
-        state: present
+        repo_state: present
+        kubeconfig: "{{ kubeconfig_path }}"
 
     - name: Add Helm repository for Grafana
       kubernetes.core.helm_repository:
         name: grafana
         repo_url: https://grafana.github.io/helm-charts
-        state: present
+        repo_state: present
+        kubeconfig: "{{ kubeconfig_path }}"
 
     - name: Update Helm repositories
-      command: helm repo update
-      args:
-        warn: false
+      command:
+        cmd: helm repo update
 
     - name: Install Prometheus
       kubernetes.core.helm:
-        name: prometheus
+        kubeconfig: "{{ kubeconfig_path }}"
+        release_name: prometheus
         chart_ref: prometheus-community/prometheus
-        release_namespace: "{{ prometheus_namespace }}"
-        create_namespace: false
+        release_namespace: monitoring
+        release_state: present
 
     - name: Install Grafana
       kubernetes.core.helm:
-        name: grafana
+        kubeconfig: "{{ kubeconfig_path }}"
+        release_name: grafana
         chart_ref: grafana/grafana
-        release_namespace: "{{ prometheus_namespace }}"
-        create_namespace: false
-        values:
-          - adminPassword: 'admin'
-          - service:
-              type: NodePort
-              nodePort: 32000
+        release_namespace: monitoring
+        release_state: present
+        release_values:
+          adminPassword: "admin"
+          datasources:
+            datasources.yaml:
+              apiVersion: 1
+              datasources:
+                - name: "Prometheus"
+                  type: "prometheus"
+                  access: "proxy"
+                  isDefault: true
+                  url: "http://prometheus-server.monitoring.svc.cluster.local"
+          service:
+            type: NodePort
+            nodePort: 32000
+
+    - name: Display Grafana and Prometheus access URLs
+      debug:
+        msg: |
+          Access Grafana at: http://{{ hostvars['localhost'].ansible_default_ipv4.address }}:32000
+          Access Prometheus at: http://{{ hostvars['localhost'].ansible_default_ipv4.address }}:9090
