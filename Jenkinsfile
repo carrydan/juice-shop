@@ -2,40 +2,63 @@ pipeline {
     agent any
 
     environment {
-        ANSIBLE_CONFIG = 'juice-shop/ansible-k8s/ansible.cfg'  // Указываем корректный файл конфигурации Ansible
-        KUBECONFIG = "${WORKSPACE}/.kube/config"  // Используем kubeconfig для подключения к кластеру
+        KUBECONFIG = '/home/carrydan/.kube/config'
+        vault_jwt_secret = credentials('jwt')
+        NGROK_AUTHTOKEN = credentials('ngrok_authtoken')
     }
 
     stages {
         stage('Clone Repository') {
             steps {
                 script {
-                    // Клонируем репозиторий с веткой master
                     git branch: 'master', url: 'https://github.com/carrydan/juice-shop.git'
                 }
             }
         }
 
-        // Этап установки Ansible и зависимостей закомментирован, так как всё уже настроено
-        /*
-        stage('Install Ansible and Dependencies') {
+        stage('Clean Up Old Pods') {
             steps {
                 script {
-                    // Устанавливаем Ansible и необходимые зависимости
+                    echo 'Deleting old Pods in monitoring, logging, and juice-shop namespaces...'
                     sh '''
-                    pip install ansible kubernetes
+                    kubectl delete pods --all -n monitoring || true
+                    kubectl delete pods --all -n logging || true
+                    kubectl delete pods --all -n juice-shop-namespace || true
                     '''
                 }
             }
         }
-        */
+
+        stage('Cache Docker Images') {
+            steps {
+                script {
+                    sh '''
+                    echo "Caching Docker images..."
+                    minikube image load quay.io/prometheus/prometheus:v2.54.1
+                    minikube image load grafana/grafana:11.2.2-security-01
+                    minikube image load docker.elastic.co/elasticsearch/elasticsearch:8.5.1
+                    minikube image load docker.elastic.co/kibana/kibana:8.5.1
+                    '''
+                }
+            }
+        }
 
         stage('Install Monitoring Stack') {
             steps {
                 script {
-                    // Устанавливаем Prometheus и Grafana
                     sh '''
-                    ansible-playbook -i juice-shop/ansible-k8s/inventory juice-shop/ansible-k8s/install_monitoring.yml -e ansible_python_interpreter=/home/carrydan/venv/bin/python3
+                    ansible-playbook -vvv -i /home/carrydan/juice-shop/ansible-k8s/inventory /home/carrydan/juice-shop/ansible-k8s/install_monitoring.yml -e ansible_python_interpreter=/home/carrydan/venv/bin/python3
+                    '''
+                }
+            }
+        }
+
+        stage('Wait for Monitoring Stack to be Ready') {
+            steps {
+                script {
+                    sh '''
+                    kubectl wait --namespace monitoring --for=condition=ready pod -l app.kubernetes.io/name=prometheus --timeout=300s
+                    kubectl wait --namespace monitoring --for=condition=ready pod -l app.kubernetes.io/name=grafana --timeout=300s
                     '''
                 }
             }
@@ -44,9 +67,19 @@ pipeline {
         stage('Install Logging Stack') {
             steps {
                 script {
-                    // Устанавливаем Elasticsearch, Fluentd и Kibana
                     sh '''
-                    ansible-playbook -i juice-shop/ansible-k8s/inventory juice-shop/ansible-k8s/install_logging.yml -e ansible_python_interpreter=/home/carrydan/venv/bin/python3
+                    ansible-playbook -vvv -i /home/carrydan/juice-shop/ansible-k8s/inventory /home/carrydan/juice-shop/ansible-k8s/install_logging.yml -e ansible_python_interpreter=/home/carrydan/venv/bin/python3
+                    '''
+                }
+            }
+        }
+
+        stage('Wait for Logging Stack to be Ready') {
+            steps {
+                script {
+                    sh '''
+                    kubectl wait --namespace logging --for=condition=ready pod -l app=elasticsearch-master --timeout=300s
+                    kubectl wait --namespace logging --for=condition=ready pod -l app=kibana --timeout=300s
                     '''
                 }
             }
@@ -55,42 +88,51 @@ pipeline {
         stage('Deploy OWASP Juice Shop') {
             steps {
                 script {
-                    // Деплой приложения Juice Shop с использованием Helm
                     sh '''
-                    ansible-playbook -i juice-shop/ansible-k8s/inventory juice-shop/ansible-k8s/deploy_application.yml -e ansible_python_interpreter=/home/carrydan/venv/bin/python3
+                    ansible-playbook -vvv -i /home/carrydan/juice-shop/ansible-k8s/inventory /home/carrydan/juice-shop/ansible-k8s/deploy_application.yml \
+                    -e ansible_python_interpreter=/home/carrydan/venv/bin/python3 -e vault_jwt_secret=${vault_jwt_secret}
                     '''
                 }
             }
         }
 
-        stage('Run Tests') {
+        stage('Start Ngrok Tunnel') {
             steps {
                 script {
-                    // Запуск тестов для приложения Juice Shop
-                    dir('juice-shop') {
-                        sh '''
-                        npm test     // Запуск тестов
-                        '''
-                    }
+                    def nodeIp = sh(returnStdout: true, script: "minikube ip").trim()
+
+                    sh '''
+                    echo "Setting up Ngrok..."
+                    ngrok authtoken ${NGROK_AUTHTOKEN}
+                    ngrok http ${nodeIp}:30000 --log=stdout > ngrok.log &
+                    sleep 5
+                    '''
+
+                    // Получение публичного URL из Ngrok
+                    def publicUrl = sh(returnStdout: true, script: "curl --silent http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url'").trim()
+
+                    echo "Access OWASP Juice Shop at: ${publicUrl}"
                 }
             }
         }
 
-        stage('Show Access Information') {
+        stage('Check Service Availability') {
             steps {
                 script {
-                    // Выводим адреса для доступа к Grafana, Prometheus, Kibana, Elasticsearch и приложению Juice Shop
-                    echo "Grafana доступна по адресу: http://<your-host>:32000"
-                    echo "Prometheus доступен по адресу: http://<your-host>:9090"
-                    echo "Kibana доступна по адресу: http://<your-host>:5601"
-                    echo "Elasticsearch доступен по адресу: http://<your-host>:9200"
-                    echo "OWASP Juice Shop доступен по адресу: http://<your-host>:<application-port>"
+                    def nodeIp = sh(returnStdout: true, script: "minikube ip").trim()
 
-                    // Команда для получения учетных данных Grafana
-                    echo "Для входа в Grafana используйте: логин - admin, пароль - admin (если не изменён)"
-                    
-                    // Учетные данные для доступа к Kibana (если есть)
-                    echo "Для входа в Kibana, используйте стандартные учетные данные (если настроено): логин - elastic, пароль - <пароль_Elasticsearch>"
+                    def services = [
+                        ['name': 'Grafana', 'url': "http://${nodeIp}:32000"],
+                        ['name': 'Prometheus', 'url': "http://${nodeIp}:30900"],
+                        ['name': 'Kibana', 'url': "http://${nodeIp}:32001"],
+                        ['name': 'Elasticsearch', 'url': "http://${nodeIp}:32002"],
+                        ['name': 'OWASP Juice Shop', 'url': "http://${nodeIp}:30000"]
+                    ]
+
+                    for (service in services) {
+                        echo "Checking ${service.name} availability..."
+                        sh "curl --fail --connect-timeout 5 ${service.url} || echo '${service.name} is not available'"
+                    }
                 }
             }
         }
@@ -99,13 +141,11 @@ pipeline {
     post {
         success {
             script {
-                // Сообщение об успешном выполнении пайплайна
                 echo 'Пайплайн успешно завершён!'
             }
         }
         failure {
             script {
-                // Сообщение о неудаче пайплайна
                 echo 'Пайплайн завершён с ошибкой.'
             }
         }

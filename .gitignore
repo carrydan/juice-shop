@@ -63,4 +63,9 @@ config/*.yml
 !config/oss.yml
 
 # System Files
-.DS_Store
+.DS_Storehelm-charts/juice-shop/.kube/
+ansible-k8s/.cache/
+ansible-k8s/.config/
+crictl-v1.28.0-linux-amd64.tar.gz
+cri-dockerd
+helm-charts/juice-shop/.kube/

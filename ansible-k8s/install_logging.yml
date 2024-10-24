@@ -4,6 +4,9 @@
   become: yes
   vars:
     logging_namespace: logging
+    kubeconfig_path: /home/carrydan/.kube/config
+    node_ip: "{{ lookup('pipe', 'kubectl get nodes -o jsonpath=\"{.items[0].status.addresses[0].address}\"') }}"
+
   tasks:
     - name: Create namespace for logging
       kubernetes.core.k8s:
@@ -32,7 +35,24 @@
         release_namespace: "{{ logging_namespace }}"
         create_namespace: false
         release_values:
-          replicas: 1  # Reduced replicas to avoid anti-affinity issue
+          replicas: 1
+          volumeClaimTemplate:
+            storageClassName: standard
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 3Gi
+          service:
+            type: NodePort 
+            nodePort: 32002  
+
+    - name: Wait for Elasticsearch pods to be running
+      shell: |
+        KUBECONFIG={{ kubeconfig_path }} kubectl get pods -n "{{ logging_namespace }}" -l app=elasticsearch-master -o jsonpath='{.items[0].status.phase}'
+      register: es_status
+      until: es_status.stdout == "Running"
+      retries: 20
+      delay: 30
 
     - name: Install Kibana
       kubernetes.core.helm:
@@ -47,6 +67,16 @@
             nodePort: 32001
           env:
             ELASTICSEARCH_HOSTS: http://elasticsearch-master:9200
+        timeout: "1200s"
+        wait: true
+
+    - name: Wait for Kibana pods to be running
+      shell: |
+        KUBECONFIG={{ kubeconfig_path }} kubectl get pods -n "{{ logging_namespace }}" -l app=kibana -o jsonpath='{.items[0].status.phase}'
+      register: kibana_status
+      until: kibana_status.stdout == "Running"
+      retries: 20
+      delay: 30
 
     - name: Add Helm repository for Fluent Bit
       kubernetes.core.helm_repository:
@@ -69,3 +99,9 @@
               port: 9200
           serviceAccount:
             create: true
+
+    - name: Display Elasticsearch and Kibana access URLs
+      debug:
+        msg: |
+          Access Elasticsearch at: http://{{ node_ip }}:32002
+          Access Kibana at: http://{{ node_ip }}:32001

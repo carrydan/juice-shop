@@ -6,6 +6,7 @@
 
   vars:
     kubeconfig_path: "/home/carrydan/.kube/config"
+    node_ip: "{{ lookup('pipe', 'kubectl get nodes -o jsonpath=\"{.items[0].status.addresses[0].address}\"') }}"
 
   tasks:
     - name: Create namespace for monitoring
@@ -34,7 +35,8 @@
 
     - name: Update Helm repositories
       command:
-        cmd: helm repo update
+        _raw_params: "helm repo update"
+        _uses_shell: true
 
     - name: Install Prometheus
       kubernetes.core.helm:
@@ -43,6 +45,11 @@
         chart_ref: prometheus-community/prometheus
         release_namespace: monitoring
         release_state: present
+        release_values:
+          server:
+            service:
+              type: NodePort
+              nodePort: 30900
 
     - name: Install Grafana
       kubernetes.core.helm:
@@ -69,5 +76,5 @@
     - name: Display Grafana and Prometheus access URLs
       debug:
         msg: |
-          Access Grafana at: http://{{ hostvars['localhost'].ansible_default_ipv4.address }}:32000
-          Access Prometheus at: http://{{ hostvars['localhost'].ansible_default_ipv4.address }}:9090
+          Access Grafana at: http://{{ node_ip }}:32000
+          Access Prometheus at: http://{{ node_ip }}:30900
