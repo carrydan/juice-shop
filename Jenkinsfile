@@ -108,7 +108,7 @@ pipeline {
                     sleep 5
                     '''
 
-                    // Получение публичного URL из Ngrok
+                    // РџРѕР»СѓС‡РµРЅРёРµ РїСѓР±Р»РёС‡РЅРѕРіРѕ URL РёР· Ngrok
                     def publicUrl = sh(returnStdout: true, script: "curl --silent http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url'").trim()
 
                     echo "Access OWASP Juice Shop at: ${publicUrl}"
@@ -141,12 +141,12 @@ pipeline {
     post {
         success {
             script {
-                echo 'Пайплайн успешно завершён!'
+                echo 'РџР°Р№РїР»Р°Р№РЅ СѓСЃРїРµС€РЅРѕ Р·Р°РІРµСЂС€С‘РЅ!'
             }
         }
         failure {
             script {
-                echo 'Пайплайн завершён с ошибкой.'
+                echo 'РџР°Р№РїР»Р°Р№РЅ Р·Р°РІРµСЂС€С‘РЅ СЃ РѕС€РёР±РєРѕР№.'
             }
         }
     }
