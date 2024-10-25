@@ -9,8 +9,6 @@ pipeline {
     }
 
     stages {
-        // Закомментированы стадии, которые уже были выполнены
-        /*
         stage('Cleanup') {
             steps {
                 script {
@@ -49,7 +47,6 @@ pipeline {
                 }
             }
         }
-        */
         
         stage('Cache Docker Images') {
             steps {
