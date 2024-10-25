@@ -2,33 +2,55 @@ pipeline {
     agent any
 
     environment {
+        DOCKER_HUB_REPO = 'carrydan/juice-shop'
         KUBECONFIG = '/home/carrydan/.kube/config'
         vault_jwt_secret = credentials('jwt')
         NGROK_AUTHTOKEN = credentials('ngrok_authtoken')
     }
 
     stages {
-        stage('Clone Repository') {
+        // Закомментированы стадии, которые уже были выполнены
+        /*
+        stage('Cleanup') {
             steps {
                 script {
-                    git branch: 'master', url: 'https://github.com/carrydan/juice-shop.git'
-                }
-            }
-        }
-
-        stage('Clean Up Old Pods') {
-            steps {
-                script {
-                    echo 'Deleting old Pods in monitoring, logging, and juice-shop namespaces...'
+                    echo "Cleaning up old resources..."
                     sh '''
+                    helm uninstall juice-shop --namespace juice-shop || true
+                    kubectl delete namespace juice-shop || true
                     kubectl delete pods --all -n monitoring || true
                     kubectl delete pods --all -n logging || true
-                    kubectl delete pods --all -n juice-shop-namespace || true
                     '''
                 }
             }
         }
 
+        stage('Clone Repository') {
+            steps {
+                git branch: 'master', url: 'https://github.com/carrydan/juice-shop.git'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    docker.build("${DOCKER_HUB_REPO}:latest")
+                }
+            }
+        }
+        
+
+        stage('Push to Docker Hub') {
+            steps {
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', 'docker') {
+                        docker.image("${DOCKER_HUB_REPO}:latest").push()
+                    }
+                }
+            }
+        }
+        */
+        
         stage('Cache Docker Images') {
             steps {
                 script {
@@ -43,41 +65,21 @@ pipeline {
             }
         }
 
-        stage('Install Monitoring Stack') {
+        stage('Install Monitoring and Logging Stack') {
             steps {
                 script {
-                    sh '''
-                    ansible-playbook -vvv -i /home/carrydan/juice-shop/ansible-k8s/inventory /home/carrydan/juice-shop/ansible-k8s/install_monitoring.yml -e ansible_python_interpreter=/home/carrydan/venv/bin/python3
-                    '''
+                    sh 'ansible-playbook -i /home/carrydan/juice-shop/ansible-k8s/inventory /home/carrydan/juice-shop/ansible-k8s/install_monitoring.yml'
+                    sh 'ansible-playbook -i /home/carrydan/juice-shop/ansible-k8s/inventory /home/carrydan/juice-shop/ansible-k8s/install_logging.yml'
                 }
             }
         }
 
-        stage('Wait for Monitoring Stack to be Ready') {
+        stage('Wait for Monitoring and Logging Stack') {
             steps {
                 script {
                     sh '''
                     kubectl wait --namespace monitoring --for=condition=ready pod -l app.kubernetes.io/name=prometheus --timeout=300s
                     kubectl wait --namespace monitoring --for=condition=ready pod -l app.kubernetes.io/name=grafana --timeout=300s
-                    '''
-                }
-            }
-        }
-
-        stage('Install Logging Stack') {
-            steps {
-                script {
-                    sh '''
-                    ansible-playbook -vvv -i /home/carrydan/juice-shop/ansible-k8s/inventory /home/carrydan/juice-shop/ansible-k8s/install_logging.yml -e ansible_python_interpreter=/home/carrydan/venv/bin/python3
-                    '''
-                }
-            }
-        }
-
-        stage('Wait for Logging Stack to be Ready') {
-            steps {
-                script {
-                    sh '''
                     kubectl wait --namespace logging --for=condition=ready pod -l app=elasticsearch-master --timeout=300s
                     kubectl wait --namespace logging --for=condition=ready pod -l app=kibana --timeout=300s
                     '''
@@ -85,12 +87,14 @@ pipeline {
             }
         }
 
-        stage('Deploy OWASP Juice Shop') {
+        stage('Deploy OWASP Juice Shop using Helm') {
             steps {
                 script {
                     sh '''
-                    ansible-playbook -vvv -i /home/carrydan/juice-shop/ansible-k8s/inventory /home/carrydan/juice-shop/ansible-k8s/deploy_application.yml \
-                    -e ansible_python_interpreter=/home/carrydan/venv/bin/python3 -e vault_jwt_secret=${vault_jwt_secret}
+                    helm upgrade --install juice-shop /home/carrydan/juice-shop/helm-charts/juice-shop \
+                        --set image.repository=${DOCKER_HUB_REPO} \
+                        --set image.tag=latest \
+                        --namespace juice-shop --create-namespace
                     '''
                 }
             }
@@ -100,17 +104,12 @@ pipeline {
             steps {
                 script {
                     def nodeIp = sh(returnStdout: true, script: "minikube ip").trim()
-
                     sh '''
-                    echo "Setting up Ngrok..."
                     ngrok authtoken ${NGROK_AUTHTOKEN}
                     ngrok http ${nodeIp}:30000 --log=stdout > ngrok.log &
                     sleep 5
                     '''
-
-                    // Получение публичного URL из Ngrok
                     def publicUrl = sh(returnStdout: true, script: "curl --silent http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url'").trim()
-
                     echo "Access OWASP Juice Shop at: ${publicUrl}"
                 }
             }
@@ -120,7 +119,6 @@ pipeline {
             steps {
                 script {
                     def nodeIp = sh(returnStdout: true, script: "minikube ip").trim()
-
                     def services = [
                         ['name': 'Grafana', 'url': "http://${nodeIp}:32000"],
                         ['name': 'Prometheus', 'url': "http://${nodeIp}:30900"],
@@ -128,7 +126,6 @@ pipeline {
                         ['name': 'Elasticsearch', 'url': "http://${nodeIp}:32002"],
                         ['name': 'OWASP Juice Shop', 'url': "http://${nodeIp}:30000"]
                     ]
-
                     for (service in services) {
                         echo "Checking ${service.name} availability..."
                         sh "curl --fail --connect-timeout 5 ${service.url} || echo '${service.name} is not available'"
@@ -140,14 +137,10 @@ pipeline {
 
     post {
         success {
-            script {
-                echo 'Пайплайн успешно завершён!'
-            }
+            echo 'Pipeline completed successfully!'
         }
         failure {
-            script {
-                echo 'Пайплайн завершён с ошибкой.'
-            }
+            echo 'Pipeline failed.'
         }
     }
 }
